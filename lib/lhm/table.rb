@@ -5,10 +5,13 @@ require 'lhm/sql_helper'
 
 module Lhm
   class Table
-    attr_reader :name, :columns, :indices, :constraints, :pk, :ddl
+    attr_reader :schema, :name, :columns, :indices, :constraints, :pk, :ddl
 
-    def initialize(name, pk = "id", ddl = nil)
+    @@schema_constraints = {}
+
+    def initialize(name, schema, pk = "id", ddl = nil)
       @name = name
+      @schema = schema
       @columns = {}
       @indices = {}
       @constraints = {}
@@ -41,12 +44,20 @@ module Lhm
 
       foreign_keys.keys.each_with_index do |key, i|
         original = foreign_keys[key][:name]
-        # Offset the new key names by the total size so they cannot overlap
-        replacement = original.sub(/(_\d+)?$/, "_#{foreign_keys.size + i + 1}")
+        replacement = replacement_constraint(original)
         dest.gsub!(original, replacement)
       end
 
       dest
+    end
+
+    def self.schema_constraint?(schema)
+      @@schema_constraints.has_key?(schema)
+    end
+
+    def self.schema_constraints(schema, value = nil)
+      @@schema_constraints[schema] = value if value
+      @@schema_constraints[schema]
     end
 
     class Parser
@@ -65,7 +76,7 @@ module Lhm
       def parse
         schema = read_information_schema
 
-        Table.new(@table_name, extract_primary_key(schema), ddl).tap do |table|
+        Table.new(@table_name, @schema_name, extract_primary_key(schema), ddl).tap do |table|
           schema.each do |defn|
             column_name    = struct_key(defn, "COLUMN_NAME")
             column_type    = struct_key(defn, "COLUMN_TYPE")
@@ -84,6 +95,16 @@ module Lhm
 
           extract_constraints(read_constraints).each do |data|
             table.constraints[data[:column]] = data
+          end
+
+          unless Table.schema_constraint?(@schema_name)
+            constraints = {}
+
+            extract_constraints(read_constraints(nil)).each do |data|
+              constraints[data[:name]] = true
+            end
+
+            Table.schema_constraints(@schema_name, constraints)
           end
         end
       end
@@ -119,13 +140,17 @@ module Lhm
           end
       end
 
-      def read_constraints
-        @connection.select_all %Q{
+      def read_constraints(table = @table_name)
+        query = %Q{
           select *
             from information_schema.key_column_usage
-           where table_name = '#{ @table_name }'
-             and table_schema = '#{ @schema_name }'
+           where table_schema = '#{ @schema_name }'
         }
+        query += %Q{
+             and table_name = '#{ @table_name }'
+        } if table
+
+        @connection.select_all(query)
       end
 
       def extract_constraints(constraints)
@@ -158,5 +183,23 @@ module Lhm
         keys.length == 1 ? keys.first : keys
       end
     end
+
+    private
+
+    def replacement_constraint(name)
+      existing = Table.schema_constraints(@schema)
+
+      replacement = name.sub(/(_\d+)?$/, '')
+
+      seq = 1
+
+      while existing.has_key?(replacement) do
+        replacement.sub!(/(_\d+)?$/, "_#{seq}")
+        seq += 1
+      end
+
+      return replacement
+    end
+
   end
 end
