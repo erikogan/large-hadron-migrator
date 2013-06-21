@@ -111,6 +111,16 @@ describe Lhm do
       end
     end
 
+    it "should remove an index with a custom name by name" do
+      Lhm.change_table(:users, :atomic_switch => false) do |t|
+        t.remove_index(:irrelevant_column_name, :index_with_a_custom_name)
+      end
+
+      slave do
+        index?(:users, :index_with_a_custom_name).must_equal(false)
+      end
+    end
+
     it "should apply a ddl statement" do
       Lhm.change_table(:users, :atomic_switch => false) do |t|
         t.ddl("alter table %s add column flag tinyint(1)" % t.name)
@@ -152,6 +162,28 @@ describe Lhm do
           :is_nullable => "NO",
           :column_default => "0"
         })
+      end
+    end
+
+    it 'should rename a column' do
+      table_create(:users)
+
+      execute("INSERT INTO users (username) VALUES ('a user')")
+      Lhm.change_table(:users, :atomic_switch => false) do |t|
+        t.rename_column(:username, :login)
+      end
+
+      slave do
+        table_data = table_read(:users)
+        table_data.columns["usernamer"].must_equal(nil)
+        table_read(:users).columns["login"].must_equal({
+          :type => "varchar(255)",
+          :is_nullable => "YES",
+          :column_default => nil
+        })
+
+        select_one('SELECT login from users').must_equal({"login"=> 'a user'})
+
       end
     end
 

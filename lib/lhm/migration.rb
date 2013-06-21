@@ -5,12 +5,13 @@ require 'lhm/intersection'
 
 module Lhm
   class Migration
-    attr_reader :origin, :destination
+    attr_reader :origin, :destination, :renames
 
-    def initialize(origin, destination, time = Time.now)
+    def initialize(origin, destination, renames = {}, time = Time.now)
       @origin = origin
       @destination = destination
       @start = time
+      @renames = renames
     end
 
     def archive_name
@@ -18,7 +19,7 @@ module Lhm
     end
 
     def intersection
-      Intersection.new(@origin, @destination)
+      Intersection.new(@origin, @destination, @renames)
     end
 
     def startstamp
